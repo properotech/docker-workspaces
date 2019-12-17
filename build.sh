@@ -12,6 +12,8 @@ DOCKERFILE=${DOCKERFILE:-Dockerfile}
 SHELL_IN_CON=${SHELL_IN_CON:-bash}
 WDIR=${WDIR:-$IMG_TYPE}
 
+! type -p jqs && echo >&2 "ERROR: no jq" && exit 1
+
 cd_wdir() {
     local wdir="${WDIR:-.}"
     if cd $wdir &>/dev/null
@@ -69,6 +71,7 @@ _get_github_check_suite_id() {
     local app_id="15368" # this is the github internal id for github actions run as a github check
     local auth_header="Authorization: bearer $GITHUB_TOKEN"
     local accept_header="Accept: application/vnd.github.antiope-preview+json"
+    echo >&2 "https://api.github.com/repos/$org_repo/commits/$sha/check-suites?app_id=$app_id"
     (
         set -o pipefail
         curl -sS --retry 3 --retry-delay 1 --retry-max-time 10 \
