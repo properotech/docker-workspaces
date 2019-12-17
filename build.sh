@@ -51,12 +51,11 @@ github_actions_build_url() {
     local org_repo="${GITHUB_REPOSITORY}"
     local sha=""
 
+    debug_sha "$org_repo" "${GITHUB_SHA}"
     sha=$(github_head_sha_in_pr "$org_repo" "${GITHUB_SHA}")
-    echo >&2 "SHA FOUND is $sha"
 
     csid=$(_get_github_check_suite_id "$org_repo" "$sha")
-    echo >&2 "csid FOUND is $csid"
-    if [[ $? -ne 0 ]] || [[ -z "$csid" ]]; then
+    if [[ $? -ne 0 ]] || [[ -z "$csid" ]] || [[ "$csid" == "null" ]] ; then
         echo >&2 "ERROR $0: failed to get github's check_suite_id"
         return 1
     fi
@@ -64,6 +63,17 @@ github_actions_build_url() {
     local build_url="${who}@https://github.com/${org_repo}/commit/$sha/checks?check_suite_id=$csid"
     export BUILD_URL="$build_url"
 
+}
+
+debug_sha() {
+    local org_repo="$1"
+    local sha="$2"
+    local auth_header="Authorization: bearer $GITHUB_TOKEN"
+    local accept_header="Accept: application/vnd.github.antiope-preview+json"
+    echo "will hit https://api.github.com/repos/$org_repo/commits/$sha"
+    curl -sS --retry 3 --retry-delay 1 --retry-max-time 10 \
+        --header "$accept_header" --header "$auth_header" \
+        "https://api.github.com/repos/$org_repo/commits/$sha"
 }
 
 # The action run is actually linked to the head sha that should be merged in,
