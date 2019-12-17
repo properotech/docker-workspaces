@@ -1,4 +1,4 @@
-name: node-12-builder
+name: node-builder
 
 on:
   pull_request:
@@ -9,8 +9,11 @@ on:
 
 jobs:
   build:
-    name: docker image for node-12-builder
+    name: docker image for node-builder
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node_major_version: [10, 12]
     steps:
     - name: ... docker login
       uses: azure/docker-login@v1
@@ -21,11 +24,13 @@ jobs:
     - name: ... git checkout
       uses: actions/checkout@v1
 
-    - name: ... docker build of builder image
+    - name: ... docker build node ${{ matrix.node_major_version }} builder image
       run: bash ./build.sh
       env:
-        IMG_TYPE: node
         DOCKERFILE: Dockerfile.builder
+        GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        IMG_TYPE: node
         SHELL_IN_CON: sh
+        NODE_MAJOR_VERSION: ${{ matrix.node_major_version }}
 
 # vim: et sr sw=2 ts=2 smartindent:

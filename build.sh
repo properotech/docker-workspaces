@@ -24,50 +24,86 @@ cd_wdir() {
 }
 
 base_img(){
-    grep -Po '(?<=^FROM ).*' $DOCKERFILE
+    if declare -f -F $IMG_TYPE::base_img &>/dev/null
+    then
+        $IMG_TYPE::base_img || return 1
+    else
+        default::base_img || return 1
+    fi
+}
+
+default::base_img() {
+    (
+        set -o pipefail
+        grep -Po '(?<=^FROM ).*' $DOCKERFILE | head -n 1
+    )
 }
 
 pull_base_img() {
     local img="$1"
-    docker pull $img >/dev/null 2>&1 || return 1
+    if docker pull $img >/dev/null 2>&1
+    then
+        return 0
+    else
+        echo >&2 "ERROR $0: unable to pull base img $img"
+        return 1
+    fi
 }
 
-apt_pkg_version() {
-    local img="$1"
-    local pkg="$2"
-
-    cmd="apt-get update &>/dev/null ; apt-cache show $pkg"
-
-    docker run -i --rm --user root $img $SHELL_IN_CON -c "$cmd" \
-    | grep -Po '(?<=^Version: )[-\d\.]+'
-}
-
-github_actions_build_url() {
+github_actions::build_url() {
     local csid=""
 
     [[ "$GITHUB_ACTIONS" == "true" ]] || return 0   # return if not run by
                                                     # github actions
     local who="${GITHUB_ACTOR}"
     local org_repo="${GITHUB_REPOSITORY}"
-    local sha="${GITHUB_SHA}"
+    local sha=""
 
-    csid=$(_get_github_check_suite_id "$org_repo" "$sha")
-    if [[ $? -ne 0 ]] || [[ -z "$csid" ]]; then
+    sha="$GITHUB_SHA"
+    if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+        sha=$(github_api::last_commit_in_pr "$org_repo" "${GITHUB_SHA}")
+        if [[ $? -ne 0 ]] || [[ -z "$sha" ]] || [[ "$sha" == "null" ]] ; then
+            echo >&2 "ERROR $0: failed to get last commit in pr"
+            return 1
+        fi
+    fi
+
+    csid=$(github_api::check_suite_id "$org_repo" "$sha")
+    if [[ $? -ne 0 ]] || [[ -z "$csid" ]] || [[ "$csid" == "null" ]] ; then
         echo >&2 "ERROR $0: failed to get github's check_suite_id"
         return 1
     fi
-    
+
     local build_url="${who}@https://github.com/${org_repo}/commit/$sha/checks?check_suite_id=$csid"
     export BUILD_URL="$build_url"
 
 }
 
-_get_github_check_suite_id() {
+# On a pull-request event $GIT_SHA refers to the merge commit pointing to the
+# PR not the last pushed commit. However, the check build url uses that
+# last pushed commit ref.
+github_api::last_commit_in_pr() {
+    local org_repo="$1"
+    local sha="$2"
+
+    local auth_header="Authorization: bearer $GIT_TOKEN"
+    local accept_header="Accept: application/vnd.github.antiope-preview+json"
+
+    (
+        set -o pipefail
+        curl -sS --retry 3 --retry-delay 1 --retry-max-time 10 \
+            --header "$accept_header" --header "$auth_header" \
+            "https://api.github.com/repos/$org_repo/commits/$sha" \
+        | jq -r '.parents[1].sha' || return 1
+    )
+}
+
+github_api::check_suite_id() {
     local org_repo="$1"
     local sha="$2"
 
     local app_id="15368" # this is the github internal id for github actions run as a github check
-    local auth_header="Authorization: bearer $GITHUB_TOKEN"
+    local auth_header="Authorization: bearer $GIT_TOKEN"
     local accept_header="Accept: application/vnd.github.antiope-preview+json"
     (
         set -o pipefail
@@ -101,8 +137,8 @@ git_sha(){
 
 git_branch(){
     r=$(git rev-parse --abbrev-ref HEAD)
-    [[ -z "$r" ]] && echo "ERROR: no rev to parse when finding branch? " >&2 && return 1
-    [[ "$r" == "HEAD" ]] && r="from-a-tag"
+    [[ -z "$r" ]] && echo "ERROR $0: no rev to parse when finding branch? " >&2 && return 1
+    [[ "$r" == "HEAD" ]] && r="not-a-branch"
     echo "$r"
 }
 
@@ -111,30 +147,34 @@ git_path_to() {
 }
 
 img_name(){
+    if declare -f -F $IMG_TYPE::img_name &>/dev/null
+    then
+        $IMG_TYPE::img_name || return 1
+    else
+        default::img_name || return 1
+    fi
+}
+
+default::img_name() {
     (
         set -o pipefail;
         grep -Po '(?<=[nN]ame=")[^"]+' $DOCKERFILE | head -n 1
     )
 }
 
-node_version() {
-    local bi="$1"
-    docker run -i --rm --user root $bi $SHELL_IN_CON -c 'echo $NODE_VERSION'
-}
-
-yarn_version() {
-    local bi="$1"
-    docker run -i --rm --user root $bi $SHELL_IN_CON -c 'echo $YARN_VERSION'
-}
-
 labels() {
-    local ai av cv jv tv bb gu gs gb gt
-    github_actions_build_url || return 1
+    if declare -f -F $IMG_TYPE::labels &>/dev/null
+    then
+        $IMG_TYPE::labels || return 1
+    else
+        default::labels || return 1
+    fi
+}
+
+default::labels() {
     bi=$(base_img) || return 1
     pull_base_img $bi || return 1
 
-    nv=$(node_version $bi) || return 1
-    yv=$(yarn_version $bi) || return 1
     bb=$(built_by) || return 1
     gu=$(git_uri) || return 1
     gs=$(git_sha) || return 1
@@ -143,8 +183,6 @@ labels() {
     gp=$(git_path_to $DOCKERFILE)
 
     cat<<EOM
-    --label node.node_version=$nv
-    --label node.yarn_version=$yv
     --label version=$(date +'%Y%m%d%H%M%S')
     --label propero.build_git_path.dockerfile=$gp
     --label propero.build_git_uri=$gu
@@ -156,20 +194,37 @@ labels() {
 EOM
 }
 
+source_build_libs() {
+    if [[ -r "libs.sh" ]]; then
+        if . libs.sh
+        then
+            echo "INFO $0: sourcing $(pwd)/libs.sh"
+        else
+            echo >&2 "ERROR $0: could not source $(pwd)/libs.sh"
+            return 1
+        fi
+    fi
+    return 0
+}
+
 docker_build(){
     (
         cd_wdir || return 1
+        source_build_libs || return 1
+        github_actions::build_url || return 1
 
         echo "... getting labels"
         labels=$(labels) || return 1
         echo "... getting img name"
         n=$(img_name) || return 1
 
-        echo "INFO: adding these labels:"
+        echo "INFO $0: adding these labels:"
         echo "$labels"
-        echo "INFO: building $n:$IMG_TAG"
-        docker build --force-rm $labels -t $n:$IMG_TAG -f $DOCKERFILE .
+        echo "INFO $0: building $n:$IMG_TAG"
+        docker build ${DOCKER_BUILD_ARGS[@]} \
+            --force-rm $labels -t $n:$IMG_TAG -f $DOCKERFILE .
     )
 }
 
+[[ -z $GIT_TOKEN ]] && echo >&2 "ERROR $0: set GIT_TOKEN in env" && exit 1
 docker_build
