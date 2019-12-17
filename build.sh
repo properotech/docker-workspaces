@@ -10,7 +10,7 @@ GIT_SHA_LEN=8
 IMG_TAG="${IMG_TAG:-candidate}"
 DOCKERFILE=${DOCKERFILE:-Dockerfile}
 SHELL_IN_CON=${SHELL_IN_CON:-bash}
-WDIR=${$WDIR:-$IMG_TYPE}
+WDIR=${WDIR:-$IMG_TYPE}
 
 cd_wdir() {
     local wdir="${WDIR:-.}"

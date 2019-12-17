@@ -16,3 +16,4 @@ WORKDIR /service
 RUN chown node:node /service
 USER node
 RUN npm install -g sequelize-cli gulp-cli nodemon bunyan
+# test github actions path match

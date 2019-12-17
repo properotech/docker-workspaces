@@ -1,0 +1,31 @@
+name: node-12-builder
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'node/Dockerfile.builder'
+
+jobs:
+  build:
+    name: docker image for node-12-builder
+    runs-on: ubuntu-latest
+    steps:
+    - name: ... docker login
+      uses: azure/docker-login@v1
+      with:
+        username: ${{ secrets.REGISTRY_USERNAME }}
+        password: ${{ secrets.REGISTRY_PASSWORD }}
+
+    - name: ... git checkout
+      uses: actions/checkout@v1
+
+    - name: ... docker build of builder image
+      run: bash ./build.sh
+      env:
+        IMG_TYPE: node
+        DOCKERFILE: Dockerfile.builder
+        SHELL_IN_CON: sh
+
+# vim: et sr sw=2 ts=2 smartindent:
