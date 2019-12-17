@@ -12,8 +12,6 @@ DOCKERFILE=${DOCKERFILE:-Dockerfile}
 SHELL_IN_CON=${SHELL_IN_CON:-bash}
 WDIR=${WDIR:-$IMG_TYPE}
 
-export
-
 cd_wdir() {
     local wdir="${WDIR:-.}"
     if cd $wdir &>/dev/null
@@ -54,8 +52,10 @@ github_actions_build_url() {
     local sha=""
 
     sha=$(github_head_sha_in_pr "$org_repo" "${GITHUB_SHA}")
+    echo >&2 "SHA FOUND is $sha"
 
     csid=$(_get_github_check_suite_id "$org_repo" "$sha")
+    echo >&2 "csid FOUND is $csid"
     if [[ $? -ne 0 ]] || [[ -z "$csid" ]]; then
         echo >&2 "ERROR $0: failed to get github's check_suite_id"
         return 1
