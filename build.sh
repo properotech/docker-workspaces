@@ -6,10 +6,22 @@
 #
 # It is a post-step to tag that appropriately and push to repo
 
-BASE_TYPE="node"
 GIT_SHA_LEN=8
-IMG_TAG="${BASE_TYPE}-candidate"
+IMG_TAG="${IMG_TAG:-candidate}"
 DOCKERFILE=${DOCKERFILE:-Dockerfile}
+SHELL_IN_CON=${SHELL_IN_CON:-bash}
+WDIR=${WDIR:-$IMG_TYPE}
+
+cd_wdir() {
+    local wdir="${WDIR:-.}"
+    if cd $wdir &>/dev/null
+    then
+        return 0
+    else
+        echo &>2 "ERROR $0: could not cd to $WDIR"
+        return 1
+    fi
+}
 
 base_img(){
     grep -Po '(?<=^FROM ).*' $DOCKERFILE
@@ -26,8 +38,45 @@ apt_pkg_version() {
 
     cmd="apt-get update &>/dev/null ; apt-cache show $pkg"
 
-    docker run -i --rm --user root $img bash -c "$cmd" \
+    docker run -i --rm --user root $img $SHELL_IN_CON -c "$cmd" \
     | grep -Po '(?<=^Version: )[-\d\.]+'
+}
+
+github_actions_build_url() {
+    local csid=""
+
+    [[ "$GITHUB_ACTIONS" == "true" ]] || return 0   # return if not run by
+                                                    # github actions
+    local who="${GITHUB_ACTOR}"
+    local org_repo="${GITHUB_REPOSITORY}"
+    local sha="${GITHUB_SHA}"
+
+    csid=$(_get_github_check_suite_id "$org_repo" "$sha")
+    if [[ $? -ne 0 ]] || [[ -z "$csid" ]]; then
+        echo >&2 "ERROR $0: failed to get github's check_suite_id"
+        return 1
+    fi
+    
+    local build_url="${who}@https://github.com/${org_repo}/commit/$sha/checks?check_suite_id=$csid"
+    export BUILD_URL="$build_url"
+
+}
+
+_get_github_check_suite_id() {
+    local org_repo="$1"
+    local sha="$2"
+
+    local app_id="15368" # this is the github internal id for github actions run as a github check
+    local auth_header="Authorization: bearer $GITHUB_TOKEN"
+    local accept_header="Accept: application/vnd.github.antiope-preview+json"
+    (
+        set -o pipefail
+        curl -sS --retry 3 --retry-delay 1 --retry-max-time 10 \
+            --header "$accept_header" --header "$auth_header" \
+            "https://api.github.com/repos/$org_repo/commits/$sha/check-suites?app_id=$app_id" \
+        | jq -r '.check_suites[0].id' || return 1
+    )
+        
 }
 
 built_by() {
@@ -70,16 +119,17 @@ img_name(){
 
 node_version() {
     local bi="$1"
-    docker run -i --rm --user root $bi bash -c 'echo $NODE_VERSION'
+    docker run -i --rm --user root $bi $SHELL_IN_CON -c 'echo $NODE_VERSION'
 }
 
 yarn_version() {
     local bi="$1"
-    docker run -i --rm --user root $bi bash -c 'echo $YARN_VERSION'
+    docker run -i --rm --user root $bi $SHELL_IN_CON -c 'echo $YARN_VERSION'
 }
 
 labels() {
     local ai av cv jv tv bb gu gs gb gt
+    github_actions_build_url || return 1
     bi=$(base_img) || return 1
     pull_base_img $bi || return 1
 
@@ -107,16 +157,19 @@ EOM
 }
 
 docker_build(){
+    (
+        cd_wdir || return 1
 
-    echo "... getting labels"
-    labels=$(labels) || return 1
-    echo "... getting img name"
-    n=$(img_name) || return 1
+        echo "... getting labels"
+        labels=$(labels) || return 1
+        echo "... getting img name"
+        n=$(img_name) || return 1
 
-    echo "INFO: adding these labels:"
-    echo "$labels"
-    echo "INFO: building $n:$IMG_TAG"
-    docker build --force-rm $labels -t $n:$IMG_TAG .
+        echo "INFO: adding these labels:"
+        echo "$labels"
+        echo "INFO: building $n:$IMG_TAG"
+        docker build --force-rm $labels -t $n:$IMG_TAG -f $DOCKERFILE .
+    )
 }
 
 docker_build
