@@ -160,7 +160,6 @@ yarn_version() {
 
 labels() {
     local ai av cv jv tv bb gu gs gb gt
-    github_actions_build_url || return 1
     bi=$(base_img) || return 1
     pull_base_img $bi || return 1
 
@@ -190,6 +189,7 @@ EOM
 docker_build(){
     (
         cd_wdir || return 1
+        github_actions_build_url || return 1
 
         echo "... getting labels"
         labels=$(labels) || return 1
