@@ -51,10 +51,9 @@ github_actions_build_url() {
                                                     # github actions
     local who="${GITHUB_ACTOR}"
     local org_repo="${GITHUB_REPOSITORY}"
-    local merge_sha="${GITHUB_SHA}"
     local sha=""
 
-    sha=$(github_head_sha_in_pr "$org_repo" "$sha")
+    sha=$(github_head_sha_in_pr "$org_repo" "${GITHUB_SHA}")
 
     csid=$(_get_github_check_suite_id "$org_repo" "$sha")
     if [[ $? -ne 0 ]] || [[ -z "$csid" ]]; then
