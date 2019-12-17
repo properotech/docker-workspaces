@@ -68,7 +68,7 @@ github_actions_build_url() {
 debug_sha() {
     local org_repo="$1"
     local sha="$2"
-    local auth_header="Authorization: bearer $GITHUB_TOKEN"
+    local auth_header="Authorization: bearer $GIT_TOKEN"
     local accept_header="Accept: application/vnd.github.antiope-preview+json"
     echo "will hit https://api.github.com/repos/$org_repo/commits/$sha"
     curl -sS --retry 3 --retry-delay 1 --retry-max-time 10 \
@@ -82,7 +82,7 @@ github_head_sha_in_pr() {
     local org_repo="$1"
     local sha="$2"
 
-    local auth_header="Authorization: bearer $GITHUB_TOKEN"
+    local auth_header="Authorization: bearer $GIT_TOKEN"
     local accept_header="Accept: application/vnd.github.antiope-preview+json"
     (
         set -o pipefail
@@ -98,7 +98,7 @@ _get_github_check_suite_id() {
     local sha="$2"
 
     local app_id="15368" # this is the github internal id for github actions run as a github check
-    local auth_header="Authorization: bearer $GITHUB_TOKEN"
+    local auth_header="Authorization: bearer $GIT_TOKEN"
     local accept_header="Accept: application/vnd.github.antiope-preview+json"
     (
         set -o pipefail
@@ -203,4 +203,5 @@ docker_build(){
     )
 }
 
+[[ -z $GIT_TOKEN ]] && echo >&2 "ERROR $0: set GIT_TOKEN in env" && exit 1
 docker_build
