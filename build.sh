@@ -12,7 +12,7 @@ DOCKERFILE=${DOCKERFILE:-Dockerfile}
 SHELL_IN_CON=${SHELL_IN_CON:-bash}
 WDIR=${WDIR:-$IMG_TYPE}
 
-! type -p jq && echo >&2 "ERROR: no jq" && exit 1
+export
 
 cd_wdir() {
     local wdir="${WDIR:-.}"
@@ -51,17 +51,37 @@ github_actions_build_url() {
                                                     # github actions
     local who="${GITHUB_ACTOR}"
     local org_repo="${GITHUB_REPOSITORY}"
-    local sha="${GITHUB_SHA}"
+    local merge_sha="${GITHUB_SHA}"
+    local sha=""
+
+    sha=$(github_head_sha_in_pr "$org_repo" "$sha")
 
     csid=$(_get_github_check_suite_id "$org_repo" "$sha")
     if [[ $? -ne 0 ]] || [[ -z "$csid" ]]; then
         echo >&2 "ERROR $0: failed to get github's check_suite_id"
         return 1
     fi
-    
+
     local build_url="${who}@https://github.com/${org_repo}/commit/$sha/checks?check_suite_id=$csid"
     export BUILD_URL="$build_url"
 
+}
+
+# The action run is actually linked to the head sha that should be merged in,
+# not the GIT_SHA which pertains to the pull request ...
+github_head_sha_in_pr() {
+    local org_repo="$1"
+    local sha="$2"
+
+    local auth_header="Authorization: bearer $GITHUB_TOKEN"
+    local accept_header="Accept: application/vnd.github.antiope-preview+json"
+    (
+        set -o pipefail
+        curl -sS --retry 3 --retry-delay 1 --retry-max-time 10 \
+            --header "$accept_header" --header "$auth_header" \
+            "https://api.github.com/repos/$org_repo/commits/$sha" \
+        | jq -r '.parents[1].sha' || return 1
+    )
 }
 
 _get_github_check_suite_id() {
@@ -71,7 +91,6 @@ _get_github_check_suite_id() {
     local app_id="15368" # this is the github internal id for github actions run as a github check
     local auth_header="Authorization: bearer $GITHUB_TOKEN"
     local accept_header="Accept: application/vnd.github.antiope-preview+json"
-    echo >&2 "https://api.github.com/repos/$org_repo/commits/$sha/check-suites?app_id=$app_id"
     (
         set -o pipefail
         curl -sS --retry 3 --retry-delay 1 --retry-max-time 10 \
