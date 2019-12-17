@@ -49,17 +49,48 @@ github_actions_build_url() {
                                                     # github actions
     local who="${GITHUB_ACTOR}"
     local org_repo="${GITHUB_REPOSITORY}"
-    local sha="${GITHUB_SHA}"
+    local sha=""
+
+    debug_sha "$org_repo" "${GITHUB_SHA}"
+    sha=$(github_head_sha_in_pr "$org_repo" "${GITHUB_SHA}")
 
     csid=$(_get_github_check_suite_id "$org_repo" "$sha")
-    if [[ $? -ne 0 ]] || [[ -z "$csid" ]]; then
+    if [[ $? -ne 0 ]] || [[ -z "$csid" ]] || [[ "$csid" == "null" ]] ; then
         echo >&2 "ERROR $0: failed to get github's check_suite_id"
         return 1
     fi
-    
+
     local build_url="${who}@https://github.com/${org_repo}/commit/$sha/checks?check_suite_id=$csid"
     export BUILD_URL="$build_url"
 
+}
+
+debug_sha() {
+    local org_repo="$1"
+    local sha="$2"
+    local auth_header="Authorization: bearer $GIT_TOKEN"
+    local accept_header="Accept: application/vnd.github.antiope-preview+json"
+    echo "will hit https://api.github.com/repos/$org_repo/commits/$sha"
+    curl -sS --retry 3 --retry-delay 1 --retry-max-time 10 \
+        --header "$accept_header" --header "$auth_header" \
+        "https://api.github.com/repos/$org_repo/commits/$sha"
+}
+
+# The action run is actually linked to the head sha that should be merged in,
+# not the GIT_SHA which pertains to the pull request ...
+github_head_sha_in_pr() {
+    local org_repo="$1"
+    local sha="$2"
+
+    local auth_header="Authorization: bearer $GIT_TOKEN"
+    local accept_header="Accept: application/vnd.github.antiope-preview+json"
+    (
+        set -o pipefail
+        curl -sS --retry 3 --retry-delay 1 --retry-max-time 10 \
+            --header "$accept_header" --header "$auth_header" \
+            "https://api.github.com/repos/$org_repo/commits/$sha" \
+        | jq -r '.parents[1].sha' || return 1
+    )
 }
 
 _get_github_check_suite_id() {
@@ -67,7 +98,7 @@ _get_github_check_suite_id() {
     local sha="$2"
 
     local app_id="15368" # this is the github internal id for github actions run as a github check
-    local auth_header="Authorization: bearer $GITHUB_TOKEN"
+    local auth_header="Authorization: bearer $GIT_TOKEN"
     local accept_header="Accept: application/vnd.github.antiope-preview+json"
     (
         set -o pipefail
@@ -129,7 +160,6 @@ yarn_version() {
 
 labels() {
     local ai av cv jv tv bb gu gs gb gt
-    github_actions_build_url || return 1
     bi=$(base_img) || return 1
     pull_base_img $bi || return 1
 
@@ -159,6 +189,7 @@ EOM
 docker_build(){
     (
         cd_wdir || return 1
+        github_actions_build_url || return 1
 
         echo "... getting labels"
         labels=$(labels) || return 1
@@ -172,4 +203,5 @@ docker_build(){
     )
 }
 
+[[ -z $GIT_TOKEN ]] && echo >&2 "ERROR $0: set GIT_TOKEN in env" && exit 1
 docker_build

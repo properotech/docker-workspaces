@@ -24,8 +24,9 @@ jobs:
     - name: ... docker build of builder image
       run: bash ./build.sh
       env:
-        IMG_TYPE: node
         DOCKERFILE: Dockerfile.builder
+        GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        IMG_TYPE: node
         SHELL_IN_CON: sh
 
 # vim: et sr sw=2 ts=2 smartindent:
