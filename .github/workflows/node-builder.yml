@@ -5,10 +5,15 @@ on:
     branches:
       - master
     paths:
-      - 'node/Dockerfile.builder'
+      - 'build.sh'
+      - 'node/**'
+  push:
+    branches:
+      - master # if result of merge to master
 
 jobs:
   build:
+    if: github.event_name == 'pull_request' && github.base_ref == 'master'
     name: docker image for node-builder
     runs-on: ubuntu-latest
     strategy:
@@ -25,12 +30,19 @@ jobs:
       uses: actions/checkout@v1
 
     - name: ... docker build node ${{ matrix.node_major_version }} builder image
-      run: bash ./build.sh
+      run: |
+        bash build.sh || exit 1
       env:
         DOCKERFILE: Dockerfile.builder
         GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        IMG_NAME: propero/builder-node${{ matrix.node_major_version }}
+        IMG_TAG: ${{ github.sha }}
         IMG_TYPE: node
-        SHELL_IN_CON: sh
         NODE_MAJOR_VERSION: ${{ matrix.node_major_version }}
+        SHELL_IN_CON: sh
 
 # vim: et sr sw=2 ts=2 smartindent:
+# 'build' pushes to docker hub on success using git sha as tag
+# this allows 'test' to retrieve the container to test it
+# Finally we can on push to master find that sha and retag
+# the image for pushing.

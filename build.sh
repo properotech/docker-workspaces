@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # vim: et sr sw=4 ts=4 smartindent:
-# helper script to generate label data for docker image during building
+# helper script to build
 #
-# docker_build will generate an image tagged :candidate
+# outputs: docker image tagged $IMG_NAME:candidate
 #
 # It is a post-step to tag that appropriately and push to repo
 
@@ -11,17 +11,7 @@ IMG_TAG="${IMG_TAG:-candidate}"
 DOCKERFILE=${DOCKERFILE:-Dockerfile}
 SHELL_IN_CON=${SHELL_IN_CON:-bash}
 WDIR=${WDIR:-$IMG_TYPE}
-
-cd_wdir() {
-    local wdir="${WDIR:-.}"
-    if cd $wdir &>/dev/null
-    then
-        return 0
-    else
-        echo &>2 "ERROR $0: could not cd to $WDIR"
-        return 1
-    fi
-}
+# $IMG_NAME can also be passed
 
 base_img(){
     if declare -f -F $IMG_TYPE::base_img &>/dev/null
@@ -61,7 +51,9 @@ github_actions::build_url() {
 
     sha="$GITHUB_SHA"
     if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-        sha=$(github_api::last_commit_in_pr "$org_repo" "${GITHUB_SHA}")
+        # on a PR, the HEAD commit is actually a merge commit representing the PR.
+        # We are really interested in the most recent commit within that merge.
+        sha=$(github_api::last_commit_in_merge "$org_repo" "${GITHUB_SHA}")
         if [[ $? -ne 0 ]] || [[ -z "$sha" ]] || [[ "$sha" == "null" ]] ; then
             echo >&2 "ERROR $0: failed to get last commit in pr"
             return 1
@@ -77,25 +69,6 @@ github_actions::build_url() {
     local build_url="${who}@https://github.com/${org_repo}/commit/$sha/checks?check_suite_id=$csid"
     export BUILD_URL="$build_url"
 
-}
-
-# On a pull-request event $GIT_SHA refers to the merge commit pointing to the
-# PR not the last pushed commit. However, the check build url uses that
-# last pushed commit ref.
-github_api::last_commit_in_pr() {
-    local org_repo="$1"
-    local sha="$2"
-
-    local auth_header="Authorization: bearer $GIT_TOKEN"
-    local accept_header="Accept: application/vnd.github.antiope-preview+json"
-
-    (
-        set -o pipefail
-        curl -sS --retry 3 --retry-delay 1 --retry-max-time 10 \
-            --header "$accept_header" --header "$auth_header" \
-            "https://api.github.com/repos/$org_repo/commits/$sha" \
-        | jq -r '.parents[1].sha' || return 1
-    )
 }
 
 github_api::check_suite_id() {
@@ -135,7 +108,8 @@ git_sha(){
     git rev-parse --short=${GIT_SHA_LEN} --verify HEAD
 }
 
-git_branch(){
+git_ref(){
+    [[ ! -z "$GITHUB_REF" ]] && echo "$GITHUB_REF" && return 0
     r=$(git rev-parse --abbrev-ref HEAD)
     [[ -z "$r" ]] && echo "ERROR $0: no rev to parse when finding branch? " >&2 && return 1
     [[ "$r" == "HEAD" ]] && r="not-a-branch"
@@ -144,22 +118,6 @@ git_branch(){
 
 git_path_to() {
     git ls-tree --name-only --full-name HEAD $1
-}
-
-img_name(){
-    if declare -f -F $IMG_TYPE::img_name &>/dev/null
-    then
-        $IMG_TYPE::img_name || return 1
-    else
-        default::img_name || return 1
-    fi
-}
-
-default::img_name() {
-    (
-        set -o pipefail;
-        grep -Po '(?<=[nN]ame=")[^"]+' $DOCKERFILE | head -n 1
-    )
 }
 
 labels() {
@@ -178,8 +136,7 @@ default::labels() {
     bb=$(built_by) || return 1
     gu=$(git_uri) || return 1
     gs=$(git_sha) || return 1
-    gb=$(git_branch) || return 1
-    gt=$(git describe 2>/dev/null || echo "no-git-tag")
+    gb=$(git_ref) || return 1
     gp=$(git_path_to $DOCKERFILE)
 
     cat<<EOM
@@ -187,30 +144,19 @@ default::labels() {
     --label propero.build_git_path.dockerfile=$gp
     --label propero.build_git_uri=$gu
     --label propero.build_git_sha=$gs
-    --label propero.build_git_branch=$gb
-    --label propero.build_git_tag=$gt
+    --label propero.build_git_ref=$gb
     --label propero.built_by=$bb
     --label propero.from_image=$bi
 EOM
 }
 
-source_build_libs() {
-    if [[ -r "libs.sh" ]]; then
-        if . libs.sh
-        then
-            echo "INFO $0: sourcing $(pwd)/libs.sh"
-        else
-            echo >&2 "ERROR $0: could not source $(pwd)/libs.sh"
-            return 1
-        fi
-    fi
-    return 0
-}
+main(){
+    . libs.sh || return 1 # source common funcs / vars
 
-docker_build(){
+    [[ -z $GIT_TOKEN ]] && echo >&2 "ERROR $0: set GIT_TOKEN in env" && return 1
     (
         cd_wdir || return 1
-        source_build_libs || return 1
+        source_build_libs || return 1 # source proj specific libs
         github_actions::build_url || return 1
 
         echo "... getting labels"
@@ -226,5 +172,4 @@ docker_build(){
     )
 }
 
-[[ -z $GIT_TOKEN ]] && echo >&2 "ERROR $0: set GIT_TOKEN in env" && exit 1
-docker_build
+main

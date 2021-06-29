@@ -4,6 +4,7 @@
 
 export DOCKER_BUILD_ARGS=(
     --build-arg NODE_MAJOR_VERSION
+    --build-arg IMG_NAME
 )
 
 node::labels() {
@@ -25,11 +26,6 @@ EOM
 
 node::base_img() {
     line=$(default::base_img)
-    eval "echo \"$line\""
-}
-
-node::img_name() {
-    line=$(default::img_name)
     eval "echo \"$line\""
 }
 
